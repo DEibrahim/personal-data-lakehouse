@@ -94,6 +94,50 @@ display(spark.table(f"{CATALOG}.gym.gold_weekly_progress").orderBy("exercise", "
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC CREATE TABLE IF NOT EXISTS workspace.gym.silver_workouts (
+# MAGIC   workout_date DATE, exercise STRING, set_no INT,
+# MAGIC   weight_kg DOUBLE, reps INT, volume_kg DOUBLE, est_1rm DOUBLE
+# MAGIC );
+# MAGIC
+# MAGIC MERGE INTO workspace.gym.silver_workouts AS t
+# MAGIC USING (
+# MAGIC   SELECT
+# MAGIC     to_date(`date`) AS workout_date,
+# MAGIC     trim(exercise) AS exercise,
+# MAGIC     CAST(set_no AS INT) AS set_no,
+# MAGIC     CAST(weight_kg AS DOUBLE) AS weight_kg,
+# MAGIC     CAST(reps AS INT) AS reps,
+# MAGIC     CAST(weight_kg AS DOUBLE) * CAST(reps AS INT) AS volume_kg,
+# MAGIC     ROUND(CAST(weight_kg AS DOUBLE) * (1 + CAST(reps AS INT) / 30), 1) AS est_1rm
+# MAGIC   FROM workspace.gym.bronze_workouts
+# MAGIC   WHERE weight_kg IS NOT NULL AND CAST(reps AS INT) > 0
+# MAGIC   QUALIFY ROW_NUMBER() OVER (
+# MAGIC     PARTITION BY to_date(`date`), trim(exercise), CAST(set_no AS INT)
+# MAGIC     ORDER BY _ingested_at DESC
+# MAGIC   ) = 1
+# MAGIC ) AS s
+# MAGIC ON  t.workout_date = s.workout_date
+# MAGIC AND t.exercise     = s.exercise
+# MAGIC AND t.set_no       = s.set_no
+# MAGIC WHEN MATCHED THEN UPDATE SET *
+# MAGIC WHEN NOT MATCHED THEN INSERT *
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE workspace.gym.gold_weekly_progress AS
+# MAGIC SELECT
+# MAGIC   CAST(date_trunc('week', workout_date) AS DATE) AS week_start,
+# MAGIC   exercise,
+# MAGIC   SUM(volume_kg) AS total_volume_kg,
+# MAGIC   MAX(est_1rm)   AS best_est_1rm,
+# MAGIC   COUNT(*)       AS sets
+# MAGIC FROM workspace.gym.silver_workouts
+# MAGIC GROUP BY CAST(date_trunc('week', workout_date) AS DATE), exercise
+
+# COMMAND ----------
+
 from pyspark.sql import functions as F
 
 CATALOG = "workspace"
@@ -187,3 +231,8 @@ gold = (
 gold.write.format("delta").mode("overwrite").saveAsTable(f"{CATALOG}.gym.gold_planned_vs_actual")
 
 display(gold.orderBy("week_start", "muscle_group"))
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT COUNT(*) AS silver_rows FROM workspace.gym.silver_workouts
