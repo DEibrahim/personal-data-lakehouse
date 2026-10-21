@@ -236,3 +236,56 @@ display(gold.orderBy("week_start", "muscle_group"))
 
 # MAGIC %sql
 # MAGIC SELECT COUNT(*) AS silver_rows FROM workspace.gym.silver_workouts
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE workspace.gym.dq_results AS
+# MAGIC SELECT
+# MAGIC   current_timestamp() AS checked_at,
+# MAGIC   check_name,
+# MAGIC   violations,
+# MAGIC   CASE WHEN violations = 0 THEN 'PASS' ELSE 'FAIL' END AS status
+# MAGIC FROM (
+# MAGIC   SELECT 'unmapped_exercise' AS check_name, COUNT(*) AS violations
+# MAGIC   FROM (SELECT DISTINCT exercise FROM workspace.gym.silver_workouts) w
+# MAGIC   LEFT ANTI JOIN workspace.gym.silver_program p ON w.exercise = p.exercise
+# MAGIC
+# MAGIC   UNION ALL
+# MAGIC   SELECT 'weight_out_of_range', COUNT(*)
+# MAGIC   FROM workspace.gym.silver_workouts
+# MAGIC   WHERE weight_kg <= 0 OR weight_kg > 150
+# MAGIC
+# MAGIC   UNION ALL
+# MAGIC   SELECT 'reps_out_of_range', COUNT(*)
+# MAGIC   FROM workspace.gym.silver_workouts
+# MAGIC   WHERE reps > 50
+# MAGIC
+# MAGIC   UNION ALL
+# MAGIC   SELECT 'future_date', COUNT(*)
+# MAGIC   FROM workspace.gym.silver_workouts
+# MAGIC   WHERE workout_date > current_date()
+# MAGIC
+# MAGIC   UNION ALL
+# MAGIC   SELECT 'duplicate_sets', COUNT(*)
+# MAGIC   FROM (
+# MAGIC     SELECT 1 FROM workspace.gym.silver_workouts
+# MAGIC     GROUP BY workout_date, exercise, set_no
+# MAGIC     HAVING COUNT(*) > 1
+# MAGIC   )
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * FROM workspace.gym.dq_results ORDER BY status DESC, check_name
+
+# COMMAND ----------
+
+failed = spark.table("workspace.gym.dq_results").filter("status = 'FAIL'").collect()
+
+if failed:
+    details = ", ".join(f"{r.check_name}={r.violations}" for r in failed)
+    raise Exception(f"Data quality failed: {details}")
+
+print("All data quality checks passed")
