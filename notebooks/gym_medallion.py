@@ -17,38 +17,24 @@ Leg Extension 35 kg 10 set 1
 Leg Extension 35 kg 8 set 2
 Overhead Triceps Cable 15 kg 10 set 1
 Overhead Triceps Cable 15 kg 8 set 2
-Triceps Pushdown 220 kg 8 set 1
+Triceps Pushdown 20 kg 8 set 1
 """
 
 dbutils.fs.put(f"/Volumes/{CATALOG}/gym/raw/notes.txt", notes.strip() + "\n", overwrite=True)
 
 # COMMAND ----------
 
-import csv, re
+import csv, sys, os
 from pathlib import Path
+
+sys.path.append(os.path.abspath(os.path.join(os.getcwd(), "..")))
+from src.parser import parse_notes
 
 CATALOG = "workspace"
 notes_path = f"/Volumes/{CATALOG}/gym/raw/notes.txt"
 out_path = f"/Volumes/{CATALOG}/gym/raw/workouts.csv"
 
-LINE = re.compile(r"^(?P<ex>.+?)\s+(?P<w>\d+(?:\.\d+)?)\s*kg\s+(?P<r>\d+)\s+set\s*(?P<s>\d+)\s*$", re.I)
-DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
-
-rows, bad, cur_date = [], [], None
-for n, raw in enumerate(Path(notes_path).read_text(encoding="utf-8").splitlines(), 1):
-    line = raw.strip()
-    if not line:
-        continue
-    m = LINE.match(line)
-    if m:
-        if not cur_date:
-            bad.append((n, line, "no date above"))
-            continue
-        rows.append((cur_date, " ".join(m["ex"].split()).title(), int(m["s"]), float(m["w"]), int(m["r"])))
-    elif DATE.search(line):
-        cur_date = DATE.search(line).group()
-    else:
-        bad.append((n, line, "unrecognized"))
+rows, bad = parse_notes(Path(notes_path).read_text(encoding="utf-8"))
 
 with open(out_path, "w", newline="", encoding="utf-8") as f:
     w = csv.writer(f)
